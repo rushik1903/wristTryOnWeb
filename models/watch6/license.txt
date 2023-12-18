@@ -1,0 +1,11 @@
+Model Information:
+* title:	Digital Watch
+* source:	https://sketchfab.com/3d-models/digital-watch-fbad4cb705104df9b60cab174680707a
+* author:	Mateusz Woliński (https://sketchfab.com/jeandiz)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Digital Watch" (https://sketchfab.com/3d-models/digital-watch-fbad4cb705104df9b60cab174680707a) by Mateusz Woliński (https://sketchfab.com/jeandiz) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
