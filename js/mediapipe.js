@@ -36,8 +36,11 @@ function crossProduct(a, b){
     return res;
 }
 
+
+// global avriables
 let objToRender = 'bracelet';
 
+let runPoseEstimation = false
 let predictedPoints = null;
 let globalWidth = 0;
 let globalHeight = 0;
@@ -85,6 +88,7 @@ function RenderObject(width, height){
   // for resizing 3d obj size using bounding box
   // resizing is not perfect for all models
   // https://discourse.threejs.org/t/unit-of-measurement-same-scale-for-all-3dmodels-in-three-js-scene-1-1-models-size-are-huge/44420/6
+  // this is not working well with current 3d model(not sure why)
   let mat = new THREE.MeshLambertMaterial({
       color: 0xff0000
   });
@@ -207,39 +211,52 @@ function RenderObject(width, height){
   maxVerticalY = 2* zDistanceOfScreenFromCamera*Math.tan(((verticlePerspectiveAngle/2) * Math.PI) / 180);
   maxVerticalX = maxVerticalY * (globalWidth/globalHeight);
   maxVerticalZ = maxVerticalX;
-  
-  // Define a custom shader material for the invisible wall
-  const wallMaterial = new THREE.ShaderMaterial({
-    transparent: true,
-    vertexShader: `
-        varying vec3 fragPosition;
-        
-        void main() {
-            fragPosition = position;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-    `,
-    fragmentShader: `
-        varying vec3 fragPosition;
-        
-        void main() {
-            // Set the condition to make everything behind the wall invisible
-            if (fragPosition.z < 0.0) {
-                discard;
-            }
-            gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0); // Transparent color
-        }
-    `
-  });
 
-  // Create a new mesh for the invisible wall
-  const wallMesh = new THREE.Mesh(new THREE.PlaneGeometry(maxVerticalX, maxVerticalY), wallMaterial);
+  // Create a plane geometry for the invisible wall
+const wallGeometry = new THREE.PlaneGeometry(maxVerticalX, maxVerticalY);
 
-  // Position the wall mesh in the scene
-  wallMesh.position.z = 0;
+// Create a mesh for the invisible wall
+const wallMesh = new THREE.Mesh(wallGeometry);
 
-  // Add the wall mesh to the scene
-  scene.add(wallMesh);
+// Set the wall mesh position in the scene
+wallMesh.position.z = 0;
+
+// Create a material with depthWrite set to false
+const wallMaterial = new THREE.MeshBasicMaterial({
+    depthWrite: false,
+    colorWrite: false  // Disable writing to the color buffer
+});
+
+// Set the material to the wall mesh
+wallMesh.material = wallMaterial;
+
+// Create a stencil material
+const stencilMaterial = new THREE.MeshBasicMaterial({
+    stencilWrite: true,
+    stencilFunc: THREE.AlwaysStencilFunc,
+    stencilFail: THREE.ReplaceStencilOp,
+    stencilZFail: THREE.ReplaceStencilOp,
+    stencilZPass: THREE.ReplaceStencilOp,
+    colorWrite: false  // Disable writing to the color buffer
+});
+
+// Create a stencil mesh using the same geometry as the wall
+const stencilMesh = new THREE.Mesh(wallGeometry, stencilMaterial);
+
+// Set the stencil mesh position in the scene
+stencilMesh.position.z = -0.3;
+
+// Add the stencil mesh to the scene
+scene.add(stencilMesh);
+
+// Enable the stencil test on the renderer
+renderer.autoClearStencil = false;
+renderer.clearStencil();
+renderer.state.buffers.stencil.setTest(true);
+
+// Add the wall mesh to the scene
+scene.add(wallMesh);
+
 
   //Render the scene
   function animate() {
@@ -256,6 +273,9 @@ function RenderObject(width, height){
         let wristNonPunchPointLandmark = predictedPoints[0];
         let wristPunchPointLandmark = predictedPoints[1];
         let bottomPointLandmark = predictedPoints[2];
+        let isHandRight = predictedPoints[7];
+        let confidanceOfPoseEstimation = predictedPoints[8];
+        let poseYellowPoint = {x: predictedPoints[9], y: predictedPoints[10]};
 
         let yellowPoint = {x:(wristNonPunchPointLandmark.x + wristPunchPointLandmark.x)/2,
                            y:(wristNonPunchPointLandmark.y + wristPunchPointLandmark.y)/2,
@@ -271,9 +291,23 @@ function RenderObject(width, height){
                          y:(bottomPointLandmark.y),
                          z:(bottomPointLandmark.z),}
 
+                         
+        function changeWithPose(v, poseYellowPoint, oldYellowOrigin){
+          let res = {x:v.x-oldYellowOrigin.x+poseYellowPoint.x,
+                     y:v.y-oldYellowOrigin.y+poseYellowPoint.y};
+          return res;
+        }
+        console.log(predictedPoints[8])
+        console.log('confidance:');
+        console.log(confidanceOfPoseEstimation);
+        if(confidanceOfPoseEstimation > 0.5){
+          greenPoint = changeWithPose(greenPoint, poseYellowPoint, yellowPoint);
+          redPoint = changeWithPose(redPoint, poseYellowPoint, yellowPoint);
+          bluePoint = changeWithPose(bluePoint, poseYellowPoint, yellowPoint);
+        }
+
         let centerOfScreen = {x:0.5, y:0.5, z:0};
         
-
         function translateAxis(v, origin){
           return {x:-(v.x-origin.x), y:-(v.y-origin.y), z:v.z-origin.z};
         }
@@ -292,6 +326,7 @@ function RenderObject(width, height){
 
         object.position.x = yellowPoint.x;
         object.position.y = yellowPoint.y;
+        object.position.z = 0;
 
         let upVector = {x:bluePoint.x-yellowPoint.x, y:bluePoint.y-yellowPoint.y, z:bluePoint.z-yellowPoint.z}
 
@@ -299,7 +334,7 @@ function RenderObject(width, height){
         // 1
         let matrix = new THREE.Matrix4().lookAt(
                     new THREE.Vector3(yellowPoint.x, yellowPoint.y, yellowPoint.z),
-                    new THREE.Vector3(redPoint.x, redPoint.y, redPoint.z),
+                    new THREE.Vector3(greenPoint.x, greenPoint.y, greenPoint.z),
                     new THREE.Vector3(upVector.x, upVector.y, upVector.z));
         let targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(matrix);
 
@@ -339,7 +374,7 @@ function RenderObject(width, height){
 }
 
 
-function FindObjectPoints(results, width, height){
+function FindObjectPoints(results, resultsPose, width, height){
   let index = 0;
   let isHandRight = 1;
   for(let i=0;i<results.handednesses.length;i++){
@@ -450,9 +485,55 @@ function FindObjectPoints(results, width, height){
   wristNonPunchPoint['z'] = yellow['z'] + (wristWidth/2)*sideways['z']
 
   let confidanceOfPoseEstimation = 0
-  let predictionYellow2 = {};
-  predictionYellow2['x'] = 0
-  predictionYellow2['y'] = 0
+  let predictionYellow2 = {x:0, y:0};
+
+  if(runPoseEstimation){
+    if(resultsPose != null){
+      // Extract the coordinates and depth of the left elbow (Landmark 13)
+      let poseLandmarks = resultsPose.landmarks[0];
+      console.log(resultsPose);
+      console.log("jjj");
+      console.log(poseLandmarks[14]);
+      let left_elbow = poseLandmarks[14]
+      left_elbow.x *= width
+      left_elbow.y *= height
+      left_elbow.z *= width*zMultiplier
+      
+      let right_elbow = poseLandmarks[13]
+      right_elbow.x *= width
+      right_elbow.y *= height
+      right_elbow.z *= width*zMultiplier
+      // Extract the coordinates and depth of the right elbow (Landmark 14)
+      let rightHamdPoseEstimatedWrist = poseLandmarks[15]
+      rightHamdPoseEstimatedWrist.x *= width
+      rightHamdPoseEstimatedWrist.y *= height
+      rightHamdPoseEstimatedWrist.z *= width*zMultiplier
+      let leftHamdPoseEstimatedWrist = poseLandmarks[16]
+      leftHamdPoseEstimatedWrist.x *= width
+      leftHamdPoseEstimatedWrist.y *= height
+      leftHamdPoseEstimatedWrist.z *= width*zMultiplier
+
+      let bottomPointOfWrist = bottomPoint
+      let ratio = 1 / 8
+      if(isHandRight == 1){
+        predictionYellow2 = {};
+        predictionYellow2['x'] = (1-ratio)*bottomPointOfWrist.x + ratio*right_elbow.x
+        predictionYellow2['y'] = (1-ratio)*bottomPointOfWrist.y + ratio*right_elbow.y
+        predictionYellow2['z'] = (1-ratio)*bottomPointOfWrist.z + ratio*right_elbow.z // z not so useful
+        confidanceOfPoseEstimation = right_elbow.visibility
+      }
+      else{
+        predictionYellow2 = {};
+        predictionYellow2['x'] = (1-ratio)*bottomPointOfWrist.x + ratio*left_elbow.x
+        predictionYellow2['y'] = (1-ratio)*bottomPointOfWrist.y + ratio*left_elbow.y
+        predictionYellow2['z'] = (1-ratio)*bottomPointOfWrist.z + ratio*left_elbow.z // z not so useful
+        confidanceOfPoseEstimation = left_elbow.visibility
+      }
+      console.log("here");
+      console.log(confidanceOfPoseEstimation);
+      
+    }
+  }
 
   let wristNonPunchPointLandmark = {'x': wristNonPunchPoint['x']/width, 'y': wristNonPunchPoint['y']/height, 'z':wristNonPunchPoint['z']/width}
   let wristPunchPointLandmark = {'x': wristPunchPoint['x']/width, 'y': wristPunchPoint['y']/height, 'z':wristPunchPoint['z']/width}
@@ -656,12 +737,13 @@ import {
     navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
       video.srcObject = stream;
       video.addEventListener("loadeddata", predictWebcam);
-      video.addEventListener("loadeddata", predictWebcamPose);
+      // video.addEventListener("loadeddata", predictWebcamPose);
     });
   }
   
   let lastVideoTime = -1;
   let results = undefined;
+  let resultsPose = undefined;
   
   function DrawDebugsOnCanvas(predictedPoints, canvasCtx, canvas){
     var canvasWidth = canvas.width;
@@ -725,11 +807,13 @@ import {
     if (runningMode === "IMAGE") {
       runningMode = "VIDEO";
       await handLandmarker.setOptions({ runningMode: "VIDEO" });
+      await poseLandmarker.setOptions({ runningMode: "VIDEO" });
     }
     let startTimeMs = performance.now();
     if (lastVideoTime !== video.currentTime) {
       lastVideoTime = video.currentTime;
       results = handLandmarker.detectForVideo(video, startTimeMs);
+      resultsPose = poseLandmarker.detectForVideo(video, startTimeMs);
     }
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement_mediapipe.width, canvasElement_mediapipe.height);
@@ -741,51 +825,25 @@ import {
         });
         drawLandmarks(canvasCtx, landmarks, { color: "#FF0000", lineWidth: 2 });
       }
-      predictedPoints = FindObjectPoints(results, globalWidth, globalHeight);
+      predictedPoints = FindObjectPoints(results, resultsPose, globalWidth, globalHeight);
       DrawDebugsOnCanvas(predictedPoints, canvasCtx, canvasElement_mediapipe);
       // TransformObject(0,0,predictedPoints);
       // TransformObject(predictedPoints);
       // drawLandmarks(canvasCtx, [predictedPoints[0], predictedPoints[1], predictedPoints[2]], { color: "#FF0000", lineWidth: 2 });
-
+    }
+    if(resultsPose.landmarks.length != 0){
+      for (const landmark of resultsPose.landmarks) {
+        // drawingUtils.drawConnectors(landmark, PoseLandmarker.POSE_CONNECTIONS);
+      }
+      console.log(resultsPose);
+      // let poseData = ProcessPoseResults(results);
+      // DrawDebugsOnCanvasPose(poseData, canvasCtx, canvasElement_mediapipe);
     }
     canvasCtx.restore(results.landmarks);
+    canvasCtx.restore(resultsPose.landmarks);
   
     // Call this function again to keep predicting when the browser is ready.
     if (webcamRunning === true) {
       window.requestAnimationFrame(predictWebcam);
-    }
-  }
-
-  let lastVideoTimePose = -1;
-  async function predictWebcamPose() {
-    canvasElement_mediapipe.style.height = video.videoHeight;
-    video.style.height = video.videoHeight;
-    canvasElement_mediapipe.style.width = video.videoWidth;
-    video.style.width = video.videoWidth;
-    // Now let's start detecting the stream.
-    if (runningMode === "IMAGE") {
-      runningMode = "VIDEO";
-      await poseLandmarker.setOptions({ runningMode: "VIDEO" });
-    }
-    let startTimeMs = performance.now();
-    if (lastVideoTimePose !== video.currentTime) {
-      lastVideoTimePose = video.currentTime;
-      poseLandmarker.detectForVideo(video, startTimeMs, (result) => {
-        canvasCtx.save();
-        canvasCtx.clearRect(0, 0, canvasElement_mediapipe.width, canvasElement_mediapipe.height);
-        for (const landmark of result.landmarks) {
-          drawingUtils.drawConnectors(landmark, PoseLandmarker.POSE_CONNECTIONS);
-        }
-        console.log(result);
-        // let poseData = ProcessPoseResults(results);
-        // DrawDebugsOnCanvasPose(poseData, canvasCtx, canvasElement_mediapipe);
-
-        canvasCtx.restore();
-      });
-    }
-  
-    // Call this function again to keep predicting when the browser is ready.
-    if (webcamRunning === true) {
-      window.requestAnimationFrame(predictWebcamPose);
     }
   }
